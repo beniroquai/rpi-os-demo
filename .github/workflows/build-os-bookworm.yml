@@ -15,6 +15,7 @@ on:
         required: false
 
 jobs:
+
   build:
     name: build
     strategy:
@@ -34,3 +35,60 @@ jobs:
       base_image_variant: ${{ matrix.base_variant_name }}
       base_release_date: 2024-11-19
       arch: arm64
+
+  upload-zenodo:
+    name: Upload to Zenodo
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.image_name }}
+
+      - name: List downloaded files
+        run: ls -R
+
+      - name: Create Zenodo deposit
+        id: create_deposit
+        env:
+          ZENODO_API: "https://zenodo.org/api/deposit/depositions"
+        run: |
+          RESPONSE=$(curl -s -X POST "$ZENODO_API" \
+            --fail-with-body \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.ZENODO_ACCESS_TOKEN }}" \
+            --data '{
+              "metadata": {
+                "title": "Raspberry Pi OS Bookworm",
+                "upload_type": "dataset",
+                "description": "Automated build of Raspberry Pi OS (Bookworm) for UC2",
+                "creators": [{"name": "Benedict Diederich"}]
+              }
+            }')
+
+          DEPOSIT_ID=$(echo $RESPONSE | jq -r '.id')
+          echo "id=$DEPOSIT_ID" >> $GITHUB_OUTPUT
+
+      - name: Upload image to Zenodo
+        env:
+          ZENODO_API: "https://zenodo.org/api/deposit/depositions/${{ steps.create_deposit.outputs.id }}/files"
+          FILENAME: "${{ needs.build.outputs.image_name }}.img.xz"
+        run: |
+          curl -s -X POST "$ZENODO_API" \
+            --fail-with-body \
+            -H "Authorization: Bearer ${{ secrets.ZENODO_ACCESS_TOKEN }}" \
+            -F "file=@$FILENAME"
+
+      - name: Publish Zenodo record
+        env:
+          ZENODO_API: "https://zenodo.org/api/deposit/depositions/${{ steps.create_deposit.outputs.id }}/actions/publish"
+        run: |
+          curl -s -X POST "$ZENODO_API" \
+            --fail-with-body \
+            -H "Authorization: Bearer ${{ secrets.ZENODO_ACCESS_TOKEN }}"
+
+      - name: Output Zenodo link
+        run: echo "Zenodo record available at https://zenodo.org/record/${{ steps.create_deposit.outputs.id }}"

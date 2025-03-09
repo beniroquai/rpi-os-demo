@@ -26,6 +26,10 @@ on:
         description: 'The CPU architecture of the OS (armhf, arm64)'
         required: true
         type: string
+    outputs:
+      image_name:
+        description: "Name of the built OS image, without any file extensions"
+        value: ${{ jobs.build-os-image.outputs.image_name }}
 
 jobs:
   build-os-image:
@@ -38,6 +42,8 @@ jobs:
       packages: write
       id-token: write
     timeout-minutes: 30
+    outputs:
+      image_name: ${{ steps.name-image.outputs.image_name }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -166,6 +172,7 @@ jobs:
       # UPLOAD OS IMAGE
 
       - name: Determine output image name
+        id: name-image
         env:
           TAG_PREFIX: "v"
         run: |
@@ -186,7 +193,7 @@ jobs:
 
           # Assemble the image name
           output_name="${{ inputs.name }}-$version"
-          echo "OUTPUT_IMAGE_NAME=$output_name" >> $GITHUB_ENV
+          echo "image_name=$output_name" >> $GITHUB_OUTPUT
 
       - name: Shrink the OS image
         uses: ethanjli/pishrink-action@v0.1.4
@@ -194,15 +201,15 @@ jobs:
           PISHRINK_XZ: -T0 ${{ github.ref_type == 'tag' && '-9' || '-1' }}
         with:
           image: ${{ steps.expand-image.outputs.destination }}
-          destination: ${{ env.OUTPUT_IMAGE_NAME }}.img
+          destination: ${{ steps.name-image.outputs.image_name }}.img
           compress: xz
           compress-parallel: true
 
       - name: Upload image to Job Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.OUTPUT_IMAGE_NAME }}
-          path: ${{ env.OUTPUT_IMAGE_NAME }}.img.xz
+          name: ${{ steps.name-image.outputs.image_name }}
+          path: ${{ steps.name-image.outputs.image_name }}.img.xz
           if-no-files-found: error
           retention-days: 0
           compression-level: 0
